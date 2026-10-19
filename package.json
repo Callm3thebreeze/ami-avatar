@@ -1,0 +1,12 @@
+{
+  "name": "@laude/robot-avatar",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Avatar SVG animado reutilizable del asistente de Laude",
+  "main": "avatar/robot-avatar.js",
+  "types": "avatar/robot-avatar.d.ts",
+  "files": ["avatar/", "vendor/gsap.min.js", "example.html", "README.md"],
+  "scripts": {
+    "test": "node --test tests/robot-avatar.test.cjs"
+  }
+}

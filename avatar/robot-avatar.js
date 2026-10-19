@@ -49,9 +49,9 @@
    ========================================================================= */
 
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.RobotAvatar = factory();
-})(typeof self !== 'undefined' ? self : this, function () {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('../vendor/gsap.min.js').gsap);
+  else root.RobotAvatar = factory(root.gsap);
+})(typeof self !== 'undefined' ? self : this, function (gsap) {
   'use strict';
 
   /* ---------------------------------------------------------------------- */
@@ -523,12 +523,14 @@
   /* ---------------------------------------------------------------------- */
 
   function RobotAvatar(host, options) {
-    if (typeof gsap === 'undefined') {
+    if (!gsap) {
       throw new Error('RobotAvatar necesita GSAP 3. Carga vendor/gsap.min.js antes de este archivo.');
     }
-    if (!host) throw new Error('RobotAvatar necesita un elemento contenedor.');
+    if (!host || host.nodeType !== 1) throw new Error('RobotAvatar necesita un elemento contenedor.');
 
     var opts = options || {};
+    this._destroyed = false;
+    this.speechSimulation = opts.speechSimulation !== false;
     this.uid = 'rb' + (++uidSeed);
 
     this.el = document.createElement('div');
@@ -605,7 +607,7 @@
     }
 
     this.state = 'reposo';
-    this.intensity = opts.intensity == null ? 1 : opts.intensity;
+    this.intensity = opts.intensity == null ? 1 : clamp(Number(opts.intensity) || 0, 0, 1.5);
     this.mouthOpen = 0;
     // La apertura se interpola sobre este objeto, no directamente sobre el
     // nodo: así el dibujo de boca puede seguir el valor intermedio y recorrer
@@ -625,6 +627,7 @@
     this._tlAnt = null;
     this._tlTrans = null;
     this._blinkCall = null;
+    this._tlBlink = null;
     this._speakCall = null;
     // El giro de las espirales no pertenece al ciclo ambiental: no lo toca la
     // intensidad ni un cambio de estado a medias, solo entrar o salir de
@@ -641,7 +644,9 @@
   /* ----------------------- API pública ---------------------------------- */
 
   RobotAvatar.states = STATE_ORDER;
-  RobotAvatar.stateInfo = function (name) { return STATES[name] || null; };
+  RobotAvatar.stateInfo = function (name) {
+    return Object.prototype.hasOwnProperty.call(STATES, name) ? STATES[name] : null;
+  };
 
   /**
    * Cambia de estado. Se puede llamar en cualquier momento, incluso a mitad de
@@ -657,7 +662,7 @@
    * son, byte a byte, las de los SVG originales.
    */
   RobotAvatar.prototype.setState = function (name, opts) {
-    if (!STATES[name]) return false;
+    if (this._destroyed || !RobotAvatar.stateInfo(name)) return false;
     var o = opts || {};
     var instant = o.instant || this.reduced;
     var prev = this.state;
@@ -753,6 +758,7 @@
    *     }
    */
   RobotAvatar.prototype.setMouthOpen = function (value, duration) {
+    if (this._destroyed) return this.mouthOpen;
     var open = clamp(Number(value) || 0, 0, 1);
     this.mouthOpen = open;
 
@@ -784,6 +790,7 @@
 
   /** Intensidad global de movimiento. 0 = quieto, 1 = nominal, 1.5 = máximo. */
   RobotAvatar.prototype.setIntensity = function (value) {
+    if (this._destroyed) return this.intensity;
     this.intensity = clamp(Number(value) || 0, 0, 1.5);
     this._stopAmbient();
     this._applyStatics(this.state, this.reduced ? 0 : 0.3);
@@ -793,10 +800,15 @@
 
   /** Movimiento reducido: detiene los bucles y deja las expresiones intactas. */
   RobotAvatar.prototype.setReducedMotion = function (on) {
+    if (this._destroyed) return this.reduced;
     this.reduced = !!on;
     this._stopAmbient();
     this._syncSpin();
     if (this._tlTrans) { this._tlTrans.kill(); this._tlTrans = null; }
+    this._swapGeometry(this.state);
+    // Una transición interrumpida puede dejar ojos/boca a medio cerrar.
+    gsap.set(this.el.querySelectorAll('[data-part="eye-left"],[data-part="eye-right"]'), { scaleY: 1 });
+    gsap.set(this.el.querySelectorAll('[data-part="mouth"]'), { scaleX: 1, scaleY: 1 });
     if (this.reduced) {
       // Posición neutra y exacta: ninguna animación residual.
       gsap.set(this.parts.root, { y: 0, scale: 1 });
@@ -816,13 +828,25 @@
 
   /** Detiene la simulación de habla sin cambiar de estado. */
   RobotAvatar.prototype.stopSpeechSim = function () {
+    if (this._destroyed) return;
     if (this._speakCall) { this._speakCall.kill(); this._speakCall = null; }
     this.speaking = false;
     this._emit();
   };
 
+  /** Desactiva persistentemente la simulación para conectar audio real. */
+  RobotAvatar.prototype.setSpeechSimulation = function (on) {
+    if (this._destroyed) return;
+    this.speechSimulation = !!on;
+    this.stopSpeechSim();
+    if (this.speechSimulation && STATES[this.state].speak && !this.reduced) {
+      this._startSpeechSim();
+    }
+  };
+
   /** Vuelve al punto de partida: reposo, intensidad nominal, boca cerrada. */
   RobotAvatar.prototype.reset = function () {
+    if (this._destroyed) return;
     this._stopAmbient();
     if (this._tlTrans) { this._tlTrans.kill(); this._tlTrans = null; }
     gsap.killTweensOf(this.el.querySelectorAll('g'));
@@ -870,10 +894,14 @@
 
   /** Libera el componente por completo. */
   RobotAvatar.prototype.destroy = function () {
+    if (this._destroyed) return;
+    this._destroyed = true;
     this._stopAmbient();
-    if (this._tlTrans) this._tlTrans.kill();
-    gsap.killTweensOf(this.el.querySelectorAll('g'));
+    if (this._tlTrans) { this._tlTrans.kill(); this._tlTrans = null; }
+    if (this._tlSpin) { this._tlSpin.kill(); this._tlSpin = null; }
+    gsap.killTweensOf(this.el.querySelectorAll('*'));
     gsap.killTweensOf(this._mouthProxy);
+    this.onChange = null;
     if (this.el.parentNode) this.el.parentNode.removeChild(this.el);
   };
 
@@ -1024,7 +1052,7 @@
   };
 
   RobotAvatar.prototype._startAmbient = function () {
-    if (this.reduced) return;
+    if (this.reduced || this._destroyed) return;
     var s = STATES[this.state];
     var k = this.intensity;
 
@@ -1072,7 +1100,7 @@
 
     this._startSignal(s.signal, k);
     this._scheduleBlink();
-    if (s.speak) this._startSpeechSim();
+    if (s.speak && this.speechSimulation) this._startSpeechSim();
   };
 
   RobotAvatar.prototype._stopAmbient = function () {
@@ -1080,6 +1108,11 @@
       if (this[key]) { this[key].kill(); this[key] = null; }
     }, this);
     if (this._blinkCall) { this._blinkCall.kill(); this._blinkCall = null; }
+    if (this._tlBlink) {
+      this._tlBlink.kill();
+      this._tlBlink = null;
+      gsap.set(this.el.querySelectorAll('[data-part="eye-left"],[data-part="eye-right"]'), { scaleY: 1 });
+    }
     if (this._speakCall) { this._speakCall.kill(); this._speakCall = null; }
     this.speaking = false;
   };
@@ -1150,13 +1183,17 @@
   };
 
   RobotAvatar.prototype._scheduleBlink = function () {
+    if (this._destroyed || this.reduced) return;
     var self = this;
     var s = STATES[this.state];
     if (!s.blink) return; // pensamiento: las espirales giran, no parpadean
     var wait = rand(s.blink[0], s.blink[1]) / Math.max(0.4, this.intensity);
     this._blinkCall = gsap.delayedCall(wait, function () {
+      self._blinkCall = null;
+      if (self._destroyed || self.reduced) return;
       var eyes = self.parts.eyesets[STATES[self.state].eyes].eyes;
-      var tl = gsap.timeline({ onComplete: function () { self._scheduleBlink(); } });
+      var tl = gsap.timeline({ onComplete: function () { self._tlBlink = null; self._scheduleBlink(); } });
+      self._tlBlink = tl;
       tl.to(eyes, { scaleY: 0.08, duration: 0.08, ease: 'power2.in' })
         .to(eyes, { scaleY: 1, duration: 0.13, ease: 'power2.out' });
       // Un parpadeo doble de vez en cuando: evita el patrón mecánico.
@@ -1175,6 +1212,7 @@
      sustituir esta simulación no toca el rig.
      -------------------------------------------------------------------- */
   RobotAvatar.prototype._startSpeechSim = function () {
+    if (this._destroyed || !this.speechSimulation || this.reduced) return;
     this.speaking = true;
     this._emit();
     this._speechBurst(Math.round(rand(2, 6)));

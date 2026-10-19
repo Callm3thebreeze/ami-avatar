@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="es">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ejemplo de integración del avatar</title>
+<link rel="stylesheet" href="avatar/robot-avatar.css">
+<style>
+  body { margin: 0; padding: 24px; background: #fff; color: #1e1140; font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 560px; margin: auto; }
+  h1 { font-size: 24px; }
+  #avatar { width: min(260px, 100%); margin: auto; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  button { min-height: 44px; padding: 8px 16px; background: #fff; color: #4a1fcc; border: 1px solid #4a1fcc; border-radius: 8px; font: inherit; cursor: pointer; }
+  button[aria-pressed="true"] { background: #4a1fcc; color: #fff; }
+  button:focus-visible { outline: 3px solid #4a1fcc; outline-offset: 3px; }
+</style>
+<main>
+  <h1>Avatar reutilizable</h1>
+  <div id="avatar"></div>
+  <div class="actions" aria-label="Estado del avatar">
+    <button type="button" data-state="reposo" aria-pressed="true">Reposo</button>
+    <button type="button" data-state="escucha" aria-pressed="false">Escucha</button>
+    <button type="button" data-state="pensamiento" aria-pressed="false">Pensamiento</button>
+    <button type="button" data-state="habla" aria-pressed="false">Habla</button>
+    <button type="button" data-state="alegria" aria-pressed="false">Alegría</button>
+    <button type="button" data-state="duda" aria-pressed="false">Duda</button>
+    <button type="button" data-state="sorpresa" aria-pressed="false">Sorpresa</button>
+  </div>
+  <p role="status" id="status">Estado: Reposo</p>
+</main>
+<script src="vendor/gsap.min.js"></script>
+<script src="avatar/robot-avatar.js"></script>
+<script>
+  const status = document.querySelector('#status');
+  const buttons = document.querySelectorAll('[data-state]');
+  const avatar = new RobotAvatar(document.querySelector('#avatar'), {
+    speechSimulation: true,
+    onChange(info) {
+      status.textContent = 'Estado: ' + info.label + (info.speaking ? ' (boca simulada, sin audio)' : '');
+      buttons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.state === info.state)));
+    }
+  });
+  buttons.forEach(button => button.addEventListener('click', () => avatar.setState(button.dataset.state)));
+  // En una SPA, ejecutar destroy() al desmontar la vista.
+  window.addEventListener('pagehide', () => avatar.destroy());
+  window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
+</script>
+</html>
