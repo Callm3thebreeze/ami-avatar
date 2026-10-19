@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 2,
+  "fileName": "index.html",
+  "currentVersionId": "d5fdf0f4-ff3b-423c-8659-363b9491833b",
+  "entries": [
+    {
+      "id": "d5fdf0f4-ff3b-423c-8659-363b9491833b",
+      "fileName": "index.html",
+      "version": 1,
+      "label": "Version 1",
+      "createdAt": 1792406708942,
+      "source": "ai",
+      "prompt": "No veo los entregables",
+      "size": 16965,
+      "mime": "text/html; charset=utf-8",
+      "kind": "html",
+      "contentPath": "0001-d5fdf0f4-ff3b-423c-8659-363b9491833b.html",
+      "contentDigest": "575ae4cce8737608bc7739912df1e9a42e6c01525d3731f44db24247a92d6cbd",
+      "promptSource": "message"
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+/* ============================================================================
+   robot-avatar.css — estilos del PERSONAJE únicamente.
+   No contiene nada del panel de demostración: el componente es autónomo y
+   se puede llevar tal cual a un widget de escritorio.
+
+   Todos los valores están centralizados en variables sobre .robot-avatar.
+   ========================================================================= */
+
+.robot-avatar {
+  /* Paleta tomada literalmente de los SVG originales. No alterar: es la
+     identidad del personaje. */
+  --rb-violet: #4a1fcc;
+  --rb-violet-spark: #411fcc;
+  --rb-amber: #ffa114;
+  --rb-shell: #ffffff;
+
+  /* El SVG lleva un viewBox ampliado con margen (ver robot-avatar.js) para que
+     la inclinación de cabeza y el balanceo de antena nunca recorten. Esta es
+     la proporción de ese lienzo ampliado, no la del personaje. */
+  --rb-ratio: 1043 / 1498;
+
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: var(--rb-ratio);
+  /* El personaje se escala con el contenedor y nunca se deforma. */
+  container-type: inline-size;
+}
+
+.robot-avatar__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  /* Sin transiciones CSS: todo el movimiento lo gobierna GSAP, de modo que
+     nada compita por las mismas propiedades. */
+}
+
+/* Grupos apagados del rig. display:none en lugar de opacidad: el cambio de
+   expresión no es una disolución, ocurre oculto tras el parpadeo. */
+.robot-avatar .rb-off {
+  display: none;
+}
+
+/* Las transformaciones de GSAP se escriben sobre atributos/estilos de cada
+   grupo; declaramos box-sizing neutro para que nada herede cajas del host. */
+.robot-avatar * {
+  box-sizing: border-box;
+}
+
+/* Si el usuario del sistema pide movimiento reducido, el componente lo detecta
+   en JavaScript y detiene los bucles. Esta regla es solo el cinturón de
+   seguridad para cualquier animación CSS que se añada más adelante. */
+@media (prefers-reduced-motion: reduce) {
+  .robot-avatar,
+  .robot-avatar * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

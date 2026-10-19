@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avatar robot · prototipo de animación</title>
+<link rel="stylesheet" href="avatar/robot-avatar.css">
+<style>
+/* OD-LAYOUT-PRIMITIVES v1 — structure only: display, flex/grid, overflow, wrapping, ratio.
+   Put this @layer first; product CSS outside the layer always wins. */
+@layer od-layout {
+  :where(.od-stack,.od-row,.od-row-top,.od-cluster,.od-grid,.od-field,.od-stat,.od-cell,.od-tile) > :where(*) { min-width: 0; }
+
+  /* containers */
+  .od-stack   { display: flex; flex-direction: column; gap: var(--od-gap, 8px); }
+  .od-row     { display: flex; align-items: center; gap: var(--od-gap, 8px); }
+  .od-row-top { display: flex; align-items: flex-start; gap: var(--od-gap, 8px); }
+  .od-cluster { display: flex; flex-wrap: wrap; align-items: center; gap: var(--od-gap, 8px); }
+  .od-fill    { flex: 1 1 0; min-width: 0; }
+  .od-fixed   { flex: none; }
+  .od-grid    { display: grid; gap: var(--od-gap, 12px); grid-template-columns: repeat(var(--od-cols, 3), minmax(0, 1fr)); }
+
+  /* stacked information: each piece is its own line — never sibling inline spans */
+  .od-stat, .od-field, .od-cell { display: grid; gap: var(--od-gap, 2px); }
+  :where(.od-stat,.od-field,.od-cell) > :where(*) { display: block; }
+  .od-tile { display: grid; grid-template-rows: auto 1fr; }
+  :where(.od-tile) > :where(*) { display: block; }
+
+  /* media keeps its intrinsic ratio by default; never a distorted or cropped
+     cover by accident. height:auto lets the ratio win over an <img height="…">
+     attribute. Cropping to a uniform box is an explicit opt-in: set --od-ratio
+     AND add .od-media-cover together (per the core rule, only where a crop is
+     deliberate — tile thumbs, decorative fills — never on full-frame content). */
+  .od-media { display: block; width: 100%; height: auto; aspect-ratio: var(--od-ratio, auto); }
+  .od-media-cover { object-fit: cover; }
+
+  /* data text only — authored copy is rewritten to its budget instead */
+  .od-truncate { display: block; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .od-clamp-2, .od-clamp-3 { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  .od-clamp-2 { -webkit-line-clamp: 2; }
+  .od-clamp-3 { -webkit-line-clamp: 3; }
+  .od-lines-2 { min-height: calc(2 * 1.4em); }   /* block-level reservation for a shared baseline */
+  .od-nowrap  { white-space: nowrap; }           /* 数字+单位 · 价格+起 · 日期+星期 */
+  .od-keep    { word-break: keep-all; overflow-wrap: anywhere; } /* CJK labels break at spaces / <wbr> first */
+
+  /* screen skeleton (optional): bars take their own space, the middle scrolls — no padding guessed for chrome */
+  .od-screen { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100%; }
+  .od-scroll { overflow-y: auto; overscroll-behavior: contain; min-height: 0; }
+
+  /* horizontal rail: the next item peeks at the edge; trailing room survives overflow */
+  .od-rail { display: flex; gap: var(--od-gap, 8px); overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none;
+             padding-inline: var(--od-rail-pad, 16px); scroll-padding-inline: var(--od-rail-pad, 16px); }
+  .od-rail::-webkit-scrollbar { display: none; }
+  :where(.od-rail) > :where(*) { flex: none; scroll-snap-align: start; }
+  :where(.od-rail) > :where(:last-child) { margin-inline-end: var(--od-rail-pad, 16px); }
+
+  .od-spacer { flex: none; visibility: hidden; pointer-events: none; }
+  .od-touch  { min-width: 44px; min-height: 44px; }
+}
+/* /OD-LAYOUT-PRIMITIVES v1 */
+
+/* ===========================================================================
+   Panel de demostración. El personaje trae su propio CSS en
+   avatar/robot-avatar.css y no depende de nada de aquí.
+
+   Dirección visual: la marca la pone el propio robot. Violeta #4A1FCC y
+   ámbar #FFA114 sobre un escenario casi neutro, panel sobrio y recesivo.
+   El ámbar nunca comunica estado por sí solo: siempre va con texto.
+   ======================================================================== */
+:root {
+  --ink:        #1e1140;
+  --ink-soft:   #5b4e7d;
+  --bg:         #f7f7fa;
+  --surface:    #ffffff;
+  --line:       #e4e1f0;
+  --accent:     #4a1fcc;
+  --accent-ink: #ffffff;
+  --amber:      #ffa114;
+
+  --s1: 4px;  --s2: 8px;  --s3: 16px;
+  --s4: 24px; --s5: 32px; --s6: 48px; --s7: 64px;
+
+  --radius: 10px;
+  --t-fast: 160ms;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* El robot manda: dos tercios de ancho para el escenario en pantallas
+   grandes, y el panel debajo en pantallas estrechas. */
+.layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--s4);
+  align-items: start;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: var(--s4) var(--s3) var(--s6);
+}
+
+@media (min-width: 900px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: var(--s6);
+    padding: var(--s5) var(--s4) var(--s5);
+    min-height: 100vh;
+    align-items: center;
+  }
+}
+
+/* --------------------------------- escenario ---------------------------- */
+
+.stage {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+}
+
+/* El hueco se limita por ancho y por alto, de modo que el robot se vea
+   completo y sin recortes en cualquier ventana. 1043/1498 es la proporción
+   del lienzo ampliado del SVG. */
+.stage__slot {
+  width: 100%;
+  max-width: min(520px, calc((100vh - 220px) * 1043 / 1498));
+  min-width: 0;
+}
+
+@media (min-width: 900px) {
+  .stage__slot { max-width: min(560px, calc((100vh - 96px) * 1043 / 1498)); }
+}
+
+.stage__fallback {
+  display: none;
+  padding: var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.stage__fallback code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+}
+
+/* ----------------------------------- panel ------------------------------ */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s4);
+  --od-gap: var(--s4);
+}
+
+.panel__title {
+  margin: 0 0 var(--s1);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.panel__sub {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+
+.panel__hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: var(--s4) 0;
+}
+
+.group__legend {
+  display: block;
+  margin: 0 0 var(--s2);
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+fieldset.group {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+/* estados ----------------------------------------------------------------- */
+
+.states { --od-cols: 2; --od-gap: var(--s2); }
+
+.state-btn {
+  min-height: 44px;
+  padding: var(--s2) var(--s3);
+  font: inherit;
+  font-size: 15px;
+  text-align: left;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+}
+
+@media (hover: hover) {
+  .state-btn:hover { border-color: var(--accent); background: #f3f0fe; }
+}
+
+/* El estado activo se distingue por relleno Y por el texto del panel de
+   estado: nunca solo por color. */
+.state-btn[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+/* deslizadores ------------------------------------------------------------ */
+
+.slider { --od-gap: var(--s1); margin-bottom: var(--s4); }
+
+.slider__head { --od-gap: var(--s2); }
+
+.slider__label { font-size: 15px; font-weight: 500; }
+
+.slider__value {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+}
+
+.slider__note {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+input[type="range"] {
+  width: 100%;
+  height: 44px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* conmutador -------------------------------------------------------------- */
+
+.switch { --od-gap: var(--s3); min-height: 44px; }
+
+.switch__label { font-size: 15px; font-weight: 500; }
+
+.switch input {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* acciones ---------------------------------------------------------------- */
+
+.reset-btn {
+  width: 100%;
+  min-height: 44px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--accent);
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background var(--t-fast);
+}
+
+@media (hover: hover) {
+  .reset-btn:hover { background: #f3f0fe; }
+}
+
+/* estado en texto --------------------------------------------------------- */
+
+.status {
+  --od-gap: var(--s1);
+  padding: var(--s3);
+  background: var(--bg);
+  border-radius: 8px;
+}
+
+.status__line { font-size: 15px; }
+
+.status__state { font-weight: 600; }
+
+.status__hint {
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+
+.status__sim {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+/* La marca ámbar acompaña al texto "simulada", nunca lo sustituye. */
+.status__sim::before {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: var(--s2);
+  border-radius: 50%;
+  background: var(--amber);
+  border: 1px solid #b36f00;
+  vertical-align: baseline;
+}
+
+/* foco visible en todo control, también con teclado ---------------------- */
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+</style>
+</head>
+<body>
+
+<main class="layout">
+
+  <!-- ===================== ESCENARIO DEL PERSONAJE ===================== -->
+  <section class="stage" aria-label="Avatar">
+    <div class="stage__slot" id="slot"></div>
+    <div class="stage__fallback" id="fallback" role="alert"></div>
+  </section>
+
+  <!-- ======================== PANEL DE PRUEBAS ========================= -->
+  <section class="panel od-stack" aria-labelledby="panel-title">
+
+    <div>
+      <h1 class="panel__title" id="panel-title">Avatar del asistente</h1>
+      <p class="panel__sub">Panel de pruebas del movimiento. Siete estados sobre los cinco SVG originales.</p>
+    </div>
+
+    <fieldset class="group">
+      <legend class="group__legend">Estado</legend>
+      <div class="od-grid states" id="states"></div>
+    </fieldset>
+
+    <div
+      class="status od-field"
+      id="status"
+      role="status"
+      aria-live="polite">
+      <p class="status__line">Estado actual: <span class="status__state" id="status-state">Reposo</span></p>
+      <p class="status__hint" id="status-hint">Movimiento mínimo, parpadeos ocasionales y antena sutil.</p>
+      <p class="status__sim" id="status-sim" hidden>Apertura de boca simulada, sin audio</p>
+    </div>
+
+    <hr class="panel__hr">
+
+    <fieldset class="group">
+      <legend class="group__legend">Movimiento</legend>
+
+      <div class="slider od-field">
+        <div class="od-row slider__head">
+          <label class="slider__label od-fill" for="intensity">Intensidad</label>
+          <span class="slider__value od-fixed od-nowrap" id="intensity-out">100&nbsp;%</span>
+        </div>
+        <input type="range" id="intensity" min="0" max="150" step="5" value="100">
+      </div>
+
+      <div class="slider od-field">
+        <div class="od-row slider__head">
+          <label class="slider__label od-fill" for="mouth">Apertura de boca</label>
+          <span class="slider__value od-fixed od-nowrap" id="mouth-out">0&nbsp;%</span>
+        </div>
+        <input type="range" id="mouth" min="0" max="100" step="1" value="0"
+               aria-describedby="mouth-note">
+        <p class="slider__note" id="mouth-note">
+          Control manual. Al moverlo durante Habla se detiene la simulación.
+        </p>
+      </div>
+
+      <div class="od-row switch">
+        <label class="switch__label od-fill" for="reduced">Movimiento reducido</label>
+        <input class="od-fixed" type="checkbox" id="reduced" role="switch">
+      </div>
+    </fieldset>
+
+    <button type="button" class="reset-btn" id="reset">Reiniciar</button>
+
+  </section>
+
+</main>
+
+<!-- GSAP servido desde el propio proyecto: ninguna dependencia externa que
+     pueda no cargar. -->
+<script src="vendor/gsap.min.js"></script>
+<script src="avatar/robot-avatar.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var slot = document.getElementById('slot');
+  var fallback = document.getElementById('fallback');
+
+  // Nombres visibles de los siete estados, en el orden del panel.
+  var LABELS = {
+    reposo: 'Reposo',
+    escucha: 'Escucha',
+    pensamiento: 'Pensamiento',
+    habla: 'Habla',
+    alegria: 'Alegría',
+    duda: 'Duda',
+    sorpresa: 'Sorpresa'
+  };
+
+  var bot;
+  try {
+    // Sin onChange todavía: el componente emite su estado inicial al
+    // construirse y los nodos del panel aún no existen. Se conecta abajo,
+    // cuando ya están cableados.
+    bot = new RobotAvatar(slot);
+  } catch (err) {
+    // Si algo no carga, se dice exactamente qué, y los archivos quedan
+    // intactos para inspeccionarlos.
+    fallback.style.display = 'block';
+    fallback.innerHTML = '<strong>El avatar no se ha podido iniciar.</strong><br>' +
+      'Error: <code></code>';
+    fallback.querySelector('code').textContent = err.message;
+    return;
+  }
+
+  /* ---------------------------- botones de estado ---------------------- */
+
+  var statesHost = document.getElementById('states');
+  var buttons = {};
+
+  RobotAvatar.states.forEach(function (name) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'state-btn';
+    b.textContent = LABELS[name];
+    b.setAttribute('aria-pressed', name === 'reposo' ? 'true' : 'false');
+    b.addEventListener('click', function () { bot.setState(name); });
+    statesHost.appendChild(b);
+    buttons[name] = b;
+  });
+
+  /* ------------------------------ deslizadores -------------------------- */
+
+  var intensity = document.getElementById('intensity');
+  var intensityOut = document.getElementById('intensity-out');
+  intensity.addEventListener('input', function () {
+    var pct = Number(intensity.value);
+    intensityOut.innerHTML = pct + '&nbsp;%';
+    bot.setIntensity(pct / 100);
+  });
+
+  var mouth = document.getElementById('mouth');
+  var mouthOut = document.getElementById('mouth-out');
+  mouth.addEventListener('input', function () {
+    var pct = Number(mouth.value);
+    mouthOut.innerHTML = pct + '&nbsp;%';
+    // Tomar el control manual detiene la simulación: un solo escritor de la
+    // apertura de boca en cada momento.
+    if (bot.speaking) bot.stopSpeechSim();
+    bot.setMouthOpen(pct / 100);
+  });
+
+  /* ------------------------- movimiento reducido ------------------------ */
+
+  var reduced = document.getElementById('reduced');
+  reduced.checked = bot.reduced;
+  reduced.addEventListener('change', function () {
+    bot.setReducedMotion(reduced.checked);
+  });
+
+  /* ------------------------------- reiniciar ---------------------------- */
+
+  document.getElementById('reset').addEventListener('click', function () {
+    bot.reset();
+    intensity.value = 100;
+    intensityOut.innerHTML = '100&nbsp;%';
+    mouth.value = 0;
+    mouthOut.innerHTML = '0&nbsp;%';
+    reduced.checked = bot.reduced;
+  });
+
+  /* --------------------- estado comunicado con texto -------------------- */
+
+  var elState = document.getElementById('status-state');
+  var elHint = document.getElementById('status-hint');
+  var elSim = document.getElementById('status-sim');
+
+  function render(info) {
+    elState.textContent = info.label;
+    elHint.textContent = info.hint;
+    elSim.hidden = !info.speaking;
+
+    RobotAvatar.states.forEach(function (name) {
+      buttons[name].setAttribute('aria-pressed', String(name === info.state));
+    });
+
+    // La simulación de habla escribe la apertura; el deslizador la refleja.
+    if (!info.speaking) {
+      var pct = Math.round(info.mouthOpen * 100);
+      if (Number(mouth.value) !== pct) {
+        mouth.value = pct;
+        mouthOut.innerHTML = pct + '&nbsp;%';
+      }
+    }
+  }
+
+  // Panel cableado: ahora sí escuchamos al componente y pintamos su estado.
+  bot.onChange = render;
+  render({
+    state: bot.state,
+    label: RobotAvatar.stateInfo(bot.state).label,
+    hint: RobotAvatar.stateInfo(bot.state).hint,
+    speaking: bot.speaking,
+    reduced: bot.reduced,
+    intensity: bot.intensity,
+    mouthOpen: bot.mouthOpen
+  });
+})();
+</script>
+</body>
+</html>
